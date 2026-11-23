@@ -1,0 +1,368 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Derbi Penaltı Simülasyonu | Fenerbahçe vs Galatasaray</title>
+  <meta name="description" content="GitHub Pages uyumlu, saf Canvas ve JavaScript ile geliştirilmiş Fenerbahçe - Galatasaray Derbi Penaltı Simülasyonu.">
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='48' fill='%23111'/><circle cx='50' cy='50' r='46' fill='%23fdb912'/><text x='50' y='65' font-size='42' font-family='sans-serif' text-anchor='middle' font-weight='900' fill='%23002d72'>⚽</text></svg>">
+</head>
+<body class="theme-fb">
+  <!-- Arkadaşa Meydan Okuma Bildirim Barı -->
+  <div id="challengeBanner" class="challenge-banner hidden">
+    <div class="challenge-content">
+      <span class="challenge-badge">⚔️ MEYDAN OKUMA</span>
+      <span id="challengeText"><strong>Rakip</strong> sana meydan okudu! Hedef Skor: <strong>0</strong> Puan. Geçebilir misin?</span>
+    </div>
+    <button id="closeChallengeBtn" class="banner-close-btn" title="Kapat">✕</button>
+  </div>
+
+  <div class="game-container">
+    <!-- Yayıncı Skor Tablosu Header -->
+    <header class="broadcast-header">
+      <div class="derby-title-tag">
+        <span class="live-dot"></span> CANLI | DERBİ PENALTI SİMÜLASYONU
+      </div>
+
+      <div class="scoreboard-main">
+        <div class="team-block team-fb" id="teamFbBadge">
+          <div class="team-crest fb-crest">FB</div>
+          <div class="team-details">
+            <span class="team-name">FENERBAHÇE</span>
+            <span class="player-sub" id="fbPlayerSub">İ. C. Kahveci</span>
+          </div>
+        </div>
+
+        <div class="score-center">
+          <div class="score-display">
+            <span id="scoreUser">0</span>
+            <span class="score-divider">-</span>
+            <span id="scoreTarget">0</span>
+          </div>
+          <div class="penalty-dots" id="penaltyDots" aria-label="Penaltı Atış Göstergeleri">
+            <span class="p-dot pending" data-index="0">1</span>
+            <span class="p-dot pending" data-index="1">2</span>
+            <span class="p-dot pending" data-index="2">3</span>
+            <span class="p-dot pending" data-index="3">4</span>
+            <span class="p-dot pending" data-index="4">5</span>
+          </div>
+        </div>
+
+        <div class="team-block team-gs" id="teamGsBadge">
+          <div class="team-details text-right">
+            <span class="team-name">GALATASARAY</span>
+            <span class="player-sub" id="gsPlayerSub">V. Osimhen</span>
+          </div>
+          <div class="team-crest gs-crest">GS</div>
+        </div>
+      </div>
+
+      <div class="header-status-bar">
+        <div class="match-info">
+          <span class="info-badge" id="roundBadge">Atış 1 / 5</span>
+          <span class="info-badge difficulty-badge" id="difficultyBadge">ZORLUK: ZOR</span>
+          <span class="info-badge shooter-gk-badge" id="matchupBadge">Şutör: İrfan Can | Kaleci: Uğurcan Çakır</span>
+        </div>
+        <div class="header-actions">
+          <div class="total-score-pill">
+            <span class="label">PUAN</span>
+            <span class="value" id="totalPointsDisplay">0</span>
+          </div>
+          <button id="soundToggleBtn" class="icon-btn" title="Sesi Aç / Kapat" aria-label="Sesi Aç / Kapat">🔊</button>
+          <button id="leaderboardBtn" class="icon-btn" title="Liderlik Tablosu" aria-label="Liderlik Tablosu">🏆</button>
+          <button id="changeTeamBtn" class="icon-btn" title="Takım / Zorluk Değiştir" aria-label="Ayarlar">⚙️</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Oyun Sahası (Canvas Sahnesi) -->
+    <main class="canvas-container">
+      <canvas id="gameCanvas" width="960" height="540"></canvas>
+      
+      <!-- Yayıncı Efektleri & Bildirim Katmanı -->
+      <div id="shotAnnouncement" class="shot-announcement hidden">
+        <div class="announcement-card">
+          <h2 id="announcementTitle">GÖÖÖL!</h2>
+          <p id="announcementSub">Müthiş 90'a vuruş!</p>
+          <div class="shot-stats-pill" id="announcementStats">Hız: 112 km/s | +175 Puan</div>
+        </div>
+      </div>
+
+      <!-- Nişan Alma Yardımcısı ve Hızlı Hedef Grid İpuçları -->
+      <div class="aim-hint-overlay" id="aimHintOverlay">
+        <span>Kalede istediğin noktaya tıkla veya aşağıdaki kontrol panelinden ayarla</span>
+      </div>
+    </main>
+
+    <!-- İnteraktif Şut Kontrol Paneli -->
+    <footer class="control-hud">
+      <!-- 1. Hedef Yönü (Grid & Hızlı Seçim) -->
+      <div class="hud-panel hud-target">
+        <div class="panel-header">
+          <span class="panel-num">1</span>
+          <h3>HEDEF KÖŞE</h3>
+          <span class="target-coord" id="targetCoordLabel">Orta</span>
+        </div>
+        <div class="target-quick-grid">
+          <button class="target-btn" data-target="top-left" title="Sol Üst 90">Sol 90</button>
+          <button class="target-btn" data-target="top-center" title="Üst Orta">Üst</button>
+          <button class="target-btn" data-target="top-right" title="Sağ Üst 90">Sağ 90</button>
+          <button class="target-btn" data-target="bottom-left" title="Sol Alt Direk Dibi">Sol Alt</button>
+          <button class="target-btn active" data-target="center" title="Orta">Merkez</button>
+          <button class="target-btn" data-target="bottom-right" title="Sağ Alt Direk Dibi">Sağ Alt</button>
+        </div>
+        <div class="target-caption">Kalede hedefe tıklayarak milimetrik nişan alabilirsiniz.</div>
+      </div>
+
+      <!-- 2. Vuruş Noktası & Falso (Magnus Diyagramı) -->
+      <div class="hud-panel hud-impact">
+        <div class="panel-header">
+          <span class="panel-num">2</span>
+          <h3>VURUŞ NOKTASI & FALSO</h3>
+          <span class="impact-desc" id="impactDescLabel">Füze (Knuckleball)</span>
+        </div>
+        <div class="impact-diagram-wrapper">
+          <div class="ball-diagram" id="ballDiagram" title="Topa vurulacak noktaya tıklayın">
+            <!-- Vektörel Futbol Topu Çizimi -->
+            <svg class="ball-svg" viewBox="0 0 120 120">
+              <defs>
+                <radialGradient id="ballShade" cx="35%" cy="35%" r="65%">
+                  <stop offset="0%" stop-color="#ffffff"/>
+                  <stop offset="70%" stop-color="#d6dbe0"/>
+                  <stop offset="100%" stop-color="#8a95a5"/>
+                </radialGradient>
+              </defs>
+              <circle cx="60" cy="60" r="56" fill="url(#ballShade)" stroke="#222" stroke-width="3"/>
+              <!-- Pentagonlar ve dikişler -->
+              <polygon points="60,42 45,53 51,71 69,71 75,53" fill="#1e2229"/>
+              <polygon points="60,4 47,15 52,24 68,24 73,15" fill="#1e2229"/>
+              <polygon points="10,48 2,59 10,74 22,70 19,53" fill="#1e2229"/>
+              <polygon points="110,48 118,59 110,74 98,70 101,53" fill="#1e2229"/>
+              <polygon points="35,108 48,116 60,110 55,98 38,98" fill="#1e2229"/>
+              <polygon points="85,108 72,116 60,110 65,98 82,98" fill="#1e2229"/>
+              <!-- Dikiş çizgileri -->
+              <line x1="60" y1="42" x2="60" y2="24" stroke="#333" stroke-width="2"/>
+              <line x1="45" y1="53" x2="22" y2="53" stroke="#333" stroke-width="2"/>
+              <line x1="75" y1="53" x2="98" y2="53" stroke="#333" stroke-width="2"/>
+              <line x1="51" y1="71" x2="38" y2="98" stroke="#333" stroke-width="2"/>
+              <line x1="69" y1="71" x2="82" y2="98" stroke="#333" stroke-width="2"/>
+            </svg>
+            <!-- Tıklanan vuruş noktası imleci -->
+            <div class="impact-pointer" id="impactPointer" style="left: 60px; top: 60px;"></div>
+          </div>
+          <div class="impact-readout">
+            <div class="readout-item">
+              <span class="ro-label">Falso (Magnus):</span>
+              <span class="ro-val" id="spinValueText">Düz (0)</span>
+            </div>
+            <div class="readout-item">
+              <span class="ro-label">Yükseklik / Aşırtma:</span>
+              <span class="ro-val" id="heightValueText">Dengeli</span>
+            </div>
+            <div class="impact-presets">
+              <button class="mini-preset-btn" data-preset="left-curl" title="Sol Falso">↶ Sol</button>
+              <button class="mini-preset-btn active" data-preset="knuckle" title="Düz / Sert">⚡ Füze</button>
+              <button class="mini-preset-btn" data-preset="right-curl" title="Sağ Falso">↷ Sağ</button>
+              <button class="mini-preset-btn" data-preset="chip" title="Aşırtma">▲ Havadan</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Şut Hızı (Power Bar) & Ateşleme Butonu -->
+      <div class="hud-panel hud-power">
+        <div class="panel-header">
+          <span class="panel-num">3</span>
+          <h3>ŞUT HIZI & GÜÇ</h3>
+          <span class="power-kmh" id="powerSpeedKmh">95 km/s</span>
+        </div>
+        
+        <div class="power-slider-container">
+          <div class="power-bar-track">
+            <div class="power-bar-fill" id="powerBarFill" style="width: 58%;"></div>
+            <div class="power-indicator" id="powerIndicator" style="left: 58%;"></div>
+          </div>
+          <input type="range" id="powerRangeInput" min="40" max="135" value="95" step="1" aria-label="Şut Hızı (km/s)">
+          <div class="power-scale-labels">
+            <span>40 km/s (Hassas)</span>
+            <span>90 km/s (İdeal)</span>
+            <span>135 km/s (Füze / Riskli)</span>
+          </div>
+        </div>
+
+        <div class="error-margin-badge" id="errorMarginBadge">
+          <span>🎯 İsabet Sapması: <strong>±3.5%</strong></span>
+        </div>
+
+        <button id="shootBtn" class="shoot-action-btn">
+          <span class="shoot-icon">⚡</span>
+          <span class="shoot-text">ŞUT ÇEK</span>
+          <span class="shoot-hotkey">[SPACE]</span>
+        </button>
+      </div>
+    </footer>
+  </div>
+
+  <!-- MODAL: Takım ve Zorluk Seçimi -->
+  <div id="teamSelectModal" class="modal-overlay">
+    <div class="modal-box select-modal-box">
+      <div class="modal-header">
+        <h2>DERBİ PENALTI SİMÜLASYONU</h2>
+        <p>Takımını ve zorluk seviyeni belirle, efsanevi derbide kupayı kaldır!</p>
+      </div>
+
+      <div class="team-cards-grid">
+        <!-- FB KARTI -->
+        <div class="team-card card-fb active" data-team="FB">
+          <div class="card-crest fb-bg">FB</div>
+          <h3>FENERBAHÇE</h3>
+          <div class="card-meta">
+            <div class="meta-row"><span class="k">Şutör:</span> <span class="v">İrfan Can Kahveci (#17)</span></div>
+            <div class="meta-row"><span class="k">Rakip GK:</span> <span class="v">Uğurcan Çakır (GS)</span></div>
+            <div class="meta-row"><span class="k">Renkler:</span> <span class="v">Sarı & Lacivert</span></div>
+          </div>
+          <div class="card-select-tag">SEÇİLDİ</div>
+        </div>
+
+        <!-- GS KARTI -->
+        <div class="team-card card-gs" data-team="GS">
+          <div class="card-crest gs-bg">GS</div>
+          <h3>GALATASARAY</h3>
+          <div class="card-meta">
+            <div class="meta-row"><span class="k">Şutör:</span> <span class="v">Victor Osimhen (#45)</span></div>
+            <div class="meta-row"><span class="k">Rakip GK:</span> <span class="v">Ederson (FB)</span></div>
+            <div class="meta-row"><span class="k">Renkler:</span> <span class="v">Sarı & Kırmızı</span></div>
+          </div>
+          <div class="card-select-tag">SEÇ</div>
+        </div>
+      </div>
+
+      <!-- Zorluk Seçimi -->
+      <div class="difficulty-section">
+        <h4>ZORLUK SEVİYESİ</h4>
+        <div class="difficulty-options">
+          <label class="diff-option">
+            <input type="radio" name="difficulty" value="EASY">
+            <div class="diff-card">
+              <span class="diff-title">KOLAY</span>
+              <span class="diff-desc">Kaleci taban kurtarış %35. Rahat köşeler. Standart puan.</span>
+            </div>
+          </label>
+          <label class="diff-option">
+            <input type="radio" name="difficulty" value="HARD" checked>
+            <div class="diff-card">
+              <span class="diff-title">ZOR 🔥</span>
+              <span class="diff-desc">Kaleci taban %60 + Öngörü algoritması. 1.5x Puan Bonusu! (Maks %90 barajı)</span>
+            </div>
+          </label>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button id="startGameBtn" class="btn-primary-start">MAÇA BAŞLA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Maç Sonu & Puan Özeti -->
+  <div id="gameOverModal" class="modal-overlay hidden">
+    <div class="modal-box game-over-box">
+      <div class="modal-header">
+        <div class="trophy-badge" id="trophyBadge">🏆</div>
+        <h2 id="gameOverTitle">SERİ TAMAMLANDI!</h2>
+        <p id="gameOverSub">5 penaltılık derbi serisi sona erdi.</p>
+      </div>
+
+      <div class="game-over-stats-grid">
+        <div class="stat-box">
+          <span class="stat-number" id="finalGoalsCount">4 / 5</span>
+          <span class="stat-label">Başarılı Gol</span>
+        </div>
+        <div class="stat-box highlight">
+          <span class="stat-number" id="finalTotalPoints">850</span>
+          <span class="stat-label">Toplam Puan</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-number" id="finalAvgSpeed">108 km/s</span>
+          <span class="stat-label">Ortalama Hız</span>
+        </div>
+      </div>
+
+      <div class="points-breakdown-card">
+        <h4>Puan Dökümü</h4>
+        <div class="breakdown-row"><span>Gol Taban Puanı (100x):</span> <span id="ptsBaseGoals">400</span></div>
+        <div class="breakdown-row"><span>Hız Bonusları:</span> <span id="ptsSpeedBonus">+160</span></div>
+        <div class="breakdown-row"><span>90'lar & Köşe Bonusları:</span> <span id="ptsCornerBonus">+120</span></div>
+        <div class="breakdown-row"><span>Zor Mod Çarpanı (1.5x):</span> <span id="ptsMultiplier">+170</span></div>
+      </div>
+
+      <!-- Skor Kayıt Formu -->
+      <div class="save-score-section">
+        <label for="playerNicknameInput">Liderlik Tablosuna Adını Yazdır:</label>
+        <div class="save-input-group">
+          <input type="text" id="playerNicknameInput" maxlength="15" placeholder="Adın veya Rumuzun" value="DerbiKralı">
+          <button id="saveScoreBtn" class="btn-save-score">KAYDET</button>
+        </div>
+      </div>
+
+      <!-- Arkadaşa Meydan Okuma Butonu -->
+      <div class="challenge-friend-card">
+        <div class="challenge-info">
+          <strong>Arkadaşına Meydan Oku!</strong>
+          <span>Özel skor linkini kopyala, arkadaşına gönder ve senin skorunu geçmesini bekle!</span>
+        </div>
+        <button id="copyChallengeLinkBtn" class="btn-challenge-copy">
+          🔗 LİNKİ KOPYALA
+        </button>
+      </div>
+
+      <div class="modal-footer split-footer">
+        <button id="viewLeaderboardFromEndBtn" class="btn-secondary">Liderlik Tablosu</button>
+        <button id="playAgainBtn" class="btn-primary-start">YENİDEN OYNA</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: Liderlik Tablosu -->
+  <div id="leaderboardModal" class="modal-overlay hidden">
+    <div class="modal-box leaderboard-box">
+      <div class="modal-header">
+        <h2>🏆 DERBİ LİDERLİK TABLOSU</h2>
+        <p>En yüksek skorlar ve derbi ustaları (Yerel Cihaz)</p>
+      </div>
+
+      <div class="leaderboard-table-wrapper">
+        <table class="leaderboard-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Oyuncu</th>
+              <th>Takım</th>
+              <th>Zorluk</th>
+              <th>Gol</th>
+              <th>Puan</th>
+              <th>Tarih</th>
+            </tr>
+          </thead>
+          <tbody id="leaderboardTbody">
+            <!-- Dinamik olarak JS ile doldurulacak -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="modal-footer split-footer">
+        <button id="clearLeaderboardBtn" class="btn-danger-clear">Tabloyu Sıfırla</button>
+        <button id="closeLeaderboardBtn" class="btn-secondary">KAPAT</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Bildirimi (Link kopyalandı vb.) -->
+  <div id="toastNotification" class="toast-popup hidden">
+    <span id="toastMessage">Bağlantı panoya kopyalandı!</span>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
