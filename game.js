@@ -46,8 +46,16 @@
     OUT: 'OUT'
   };
 
+  const TIMING_STAGE = {
+    HORIZONTAL: 1,
+    VERTICAL: 2,
+    POWER: 3,
+    LOCKED: 4
+  };
+
   // Oyun Durum Nesnesi
   const state = {
+    username: localStorage.getItem('derby_player_nickname') || 'DerbiUstası',
     team: 'FB',                 // 'FB' veya 'GS'
     difficulty: 'HARD',         // 'EASY' veya 'HARD'
     currentRound: 0,            // 0..4 (5 penaltı)
@@ -58,13 +66,41 @@
     totalPoints: 0,
     currentState: GAME_STATE.AIMING,
 
-    // Şut Parametreleri
+    // 3 Aşamalı Zamanlama Barı Durumu
+    timingStage: TIMING_STAGE.HORIZONTAL,
+    timingPins: {
+      horizontal: { pos: 0.5, dir: 1, baseSpeed: 0.85 }, // 0 (sol) .. 1 (sağ)
+      vertical: { pos: 0.5, dir: 1, baseSpeed: 0.95 },   // 0 (üst) .. 1 (alt)
+      power: { pos: 0.2, dir: 1, baseSpeed: 1.15 }       // 0 (40 km/s) .. 1 (135 km/s)
+    },
+    lockedValues: {
+      horizontal: 0.5,
+      vertical: 0.5,
+      power: 0.5,
+      isHorizGreen: false,
+      isVertGreen: false,
+      isPowerGreen: false,
+      isTripleGreen: false
+    },
+
+    // Kaleci 6 Bölge İhtimal Haritası (Toplamı daima %100)
+    gkProbs: [
+      { id: 'TL', name: 'Sol Üst', baseProb: 15, currentProb: 15, col: 0, row: 0 },
+      { id: 'TC', name: 'Üst Orta', baseProb: 10, currentProb: 10, col: 1, row: 0 },
+      { id: 'TR', name: 'Sağ Üst', baseProb: 15, currentProb: 15, col: 2, row: 0 },
+      { id: 'BL', name: 'Sol Alt', baseProb: 25, currentProb: 25, col: 0, row: 1 },
+      { id: 'BC', name: 'Orta Alt', baseProb: 10, currentProb: 10, col: 1, row: 1 },
+      { id: 'BR', name: 'Sağ Alt', baseProb: 25, currentProb: 25, col: 2, row: 1 }
+    ],
+    chosenGkSector: 'BL',
+
+    // Şut Parametreleri (Zamanlama barlarından türetilir)
     target: { x: 0, y: 0.5 },    // Hedef kale düzlemi: x: -1 (sol) .. 1 (sağ), y: 0 (yer) .. 1 (üst)
-    impact: { x: 0, y: 0 },      // Vuruş noktası: x: -1 (sol) .. 1 (sağ), y: -1 (üst) .. 1 (alt)
+    impact: { x: 0, y: 0 },      // Vuruş falso/yükseklik
     speedKmh: 95,               // 40 .. 135 km/s
 
     // Meydan Okuma Parametreleri (URL)
-    challenge: null,            // { rival: 'Ad', targetScore: 850, team: 'FB' }
+    challenge: null,
 
     // Ses Tercihi
     soundEnabled: true
@@ -1012,7 +1048,10 @@
     // 3. Ağlar (Dinamik Cloth)
     netGrid.draw(ctx);
 
-    // 4. 3D Kale Direkleri (Beyaz & Metalik Gölgeli)
+    // 4. Kale İçi Kaleci İhtimal Haritası
+    drawGoalProbabilityMap(ctx);
+
+    // 5. 3D Kale Direkleri (Beyaz & Metalik Gölgeli)
     drawGoalPosts();
   }
 
@@ -1084,8 +1123,89 @@
   /* ==========================================================================
      7. NİŞAN ALMA RETİCLE'I (HEDEF İMLECİ) VE TIKLAMA HESABI
      ========================================================================== */
+  /* ==========================================================================
+     7. KALECİ İHTİMAL HARİTASI (6 BÖLGE) VE KALE HUD ÇİZİMİ
+     ========================================================================== */
+  function updateGoalProbabilityMap() {
+    // Kaleci fake hareketi (-35 .. +35 piksel)
+    const offsetNorm = Math.max(-1, Math.min(1, goalkeeper.feintOffset / 30));
+
+    let rawProbs = state.gkProbs.map(sector => {
+      let p = sector.baseProb;
+      if (sector.col === 0) {
+        // Kaleci sola meyledince sol tarafın atlama ihtimali artar
+        p -= offsetNorm * 6;
+      } else if (sector.col === 2) {
+        // Kaleci sağa meyledince sağ taraf artar
+        p += offsetNorm * 6;
+      } else {
+        p += (1 - Math.abs(offsetNorm)) * 2;
+      }
+      return Math.max(4, Math.round(p));
+    });
+
+    // Toplamı kesinlikle 100 yap
+    const sum = rawProbs.reduce((a, b) => a + b, 0);
+    const diff = 100 - sum;
+    rawProbs[3] += diff; // Dengele
+
+    rawProbs.forEach((p, idx) => {
+      state.gkProbs[idx].currentProb = p;
+    });
+  }
+
+  function pickGkSectorByProbability() {
+    updateGoalProbabilityMap();
+    const roll = Math.random() * 100;
+    let accum = 0;
+    for (const sec of state.gkProbs) {
+      accum += sec.currentProb;
+      if (roll <= accum) {
+        return sec;
+      }
+    }
+    return state.gkProbs[state.gkProbs.length - 1];
+  }
+
+  function drawGoalProbabilityMap(c) {
+    if (state.currentState !== GAME_STATE.AIMING) return;
+
+    updateGoalProbabilityMap();
+
+    const colW = GOAL.width / 3;
+    const rowH = GOAL.height / 2;
+
+    c.save();
+    for (const sec of state.gkProbs) {
+      const sx = GOAL.leftX + sec.col * colW;
+      const sy = GOAL.crossbarY + sec.row * rowH;
+
+      // Yarı saydam kutucuk
+      c.fillStyle = 'rgba(7, 16, 30, 0.45)';
+      c.strokeStyle = sec.currentProb > 22 ? 'rgba(245, 158, 11, 0.45)' : 'rgba(255, 255, 255, 0.16)';
+      c.lineWidth = 1;
+
+      c.beginPath();
+      c.roundRect(sx + 3, sy + 3, colW - 6, rowH - 6, 6);
+      c.fill();
+      c.stroke();
+
+      // Bölge Başlığı (Sol Üst, Sağ Alt vs.)
+      c.fillStyle = '#94a3b8';
+      c.font = 'bold 9px sans-serif';
+      c.textAlign = 'left';
+      c.fillText(sec.name.toUpperCase(), sx + 10, sy + 18);
+
+      // İhtimal Yüzdesi
+      c.fillStyle = sec.currentProb > 22 ? '#fbbf24' : '#38bdf8';
+      c.font = '900 15px monospace';
+      c.textAlign = 'right';
+      c.fillText(`🧤 %${sec.currentProb}`, sx + colW - 10, sy + 22);
+    }
+    c.restore();
+  }
+
   function getGoalScreenPos(target) {
-    // target.x: -1 .. 1, target.y: 0 .. 1
     const screenX = GOAL.leftX + GOAL.width * 0.5 + (target.x * GOAL.width * 0.45);
     const screenY = GOAL.groundY - (target.y * GOAL.height * 0.92);
     return { x: screenX, y: screenY };
@@ -1135,86 +1255,201 @@
   }
 
   /* ==========================================================================
-     8. KALECİ YAPAY ZEKASI VE %90 KURTARIŞ SINIRI (HARD-CAP)
+     8. 3 AŞAMALI ZAMANLAMA BARI KONTROLÜ
      ========================================================================== */
-  function calculateGoalkeeperSave(actualTarget) {
-    const isHard = state.difficulty === 'HARD';
-    // 1. Taban Olasılık (Kolay: %35, Zor: %60)
-    let saveProb = isHard ? 0.60 : 0.35;
+  function updateTimingBars(dt) {
+    if (state.currentState !== GAME_STATE.AIMING) return;
 
-    // 2. Köşeye Yakınlık Bonusu/Cezası
-    // Köşeler (özellikle 90'lar) kalecinin ulaşmasını çok zorlaştırır
-    const distFromCenter = Math.sqrt(
-      Math.pow(actualTarget.x, 2) + Math.pow(actualTarget.y - 0.5, 2)
-    );
-    // distFromCenter: 0 (tam orta) .. ~1.1 (90 köşeleri)
-    const cornerPenalty = distFromCenter * 0.28;
-    saveProb -= cornerPenalty;
+    // Kolay: 1.0x, Zor: 1.85x ibre hızı
+    const speedMultiplier = state.difficulty === 'HARD' ? 1.85 : 1.0;
 
-    // 3. Şut Hızı Faktörü (40 .. 135 km/s)
-    // 110+ km/s füzeler kalecinin reaksiyon süresini daraltır
-    const speedRatio = (state.speedKmh - 40) / (135 - 40); // 0 .. 1
-    const speedPenalty = (speedRatio - 0.5) * 0.22;
-    saveProb -= speedPenalty;
+    if (state.timingStage === TIMING_STAGE.HORIZONTAL) {
+      const pin = state.timingPins.horizontal;
+      pin.pos += pin.dir * pin.baseSpeed * speedMultiplier * dt;
+      if (pin.pos >= 1.0) { pin.pos = 1.0; pin.dir = -1; }
+      if (pin.pos <= 0.0) { pin.pos = 0.0; pin.dir = 1; }
 
-    // 4. Falso (Magnus) ve Aldatma Faktörü
-    const spinAmount = Math.abs(state.impact.x);
-    saveProb -= spinAmount * 0.12;
+      // Hedef X haritası: -1.1 .. +1.1
+      state.target.x = (pin.pos - 0.5) * 2.2;
+      const el = document.getElementById('pinHorizontal');
+      if (el) el.style.left = `${pin.pos * 100}%`;
 
-    // 5. Zor Mod Hafıza / Öngörü Algoritması
-    if (isHard && state.shotHistory.length >= 2) {
-      const lastShot = state.shotHistory[state.shotHistory.length - 1];
-      const prevShot = state.shotHistory[state.shotHistory.length - 2];
-      const currentSide = actualTarget.x < -0.2 ? 'L' : (actualTarget.x > 0.2 ? 'R' : 'C');
+      const badge = document.getElementById('badgeHorizontal');
+      if (badge) {
+        if ((pin.pos >= 0.08 && pin.pos <= 0.28) || (pin.pos >= 0.72 && pin.pos <= 0.92)) {
+          badge.textContent = '90 KÖŞE (YEŞİL)';
+        } else if (pin.pos < 0.08 || pin.pos > 0.92) {
+          badge.textContent = 'DİREK / AUT (KIRMIZI)';
+        } else {
+          badge.textContent = 'ORTA (SARI)';
+        }
+      }
+    } else if (state.timingStage === TIMING_STAGE.VERTICAL) {
+      const pin = state.timingPins.vertical;
+      pin.pos += pin.dir * pin.baseSpeed * speedMultiplier * dt;
+      if (pin.pos >= 1.0) { pin.pos = 1.0; pin.dir = -1; }
+      if (pin.pos <= 0.0) { pin.pos = 0.0; pin.dir = 1; }
 
-      // Eğer oyuncu ısrarla aynı köşeye vuruyorsa kaleci tahmin eder
-      if (currentSide === lastShot && lastShot === prevShot) {
-        saveProb += 0.16; // Kaleci köşeyi ezberledi
-      } else {
-        // Değiştiriyorsa kalecinin ters köşede kalma payı
-        saveProb -= 0.08;
+      // Hedef Y haritası: 0 (üst 90) .. 1 (yer) -> target.y = 1.05 - pos * 1.1
+      state.target.y = Math.max(-0.1, Math.min(1.1, 1.05 - pin.pos * 1.1));
+      const el = document.getElementById('pinVertical');
+      if (el) el.style.left = `${pin.pos * 100}%`;
+
+      const badge = document.getElementById('badgeVertical');
+      if (badge) {
+        if ((pin.pos >= 0.10 && pin.pos <= 0.35) || (pin.pos >= 0.73 && pin.pos <= 0.95)) {
+          badge.textContent = 'KÖŞE (YEŞİL)';
+        } else if (pin.pos < 0.10) {
+          badge.textContent = 'ÜSTTEN AUT (KIRMIZI)';
+        } else {
+          badge.textContent = 'ORTA (SARI)';
+        }
+      }
+    } else if (state.timingStage === TIMING_STAGE.POWER) {
+      const pin = state.timingPins.power;
+      pin.pos += pin.dir * pin.baseSpeed * speedMultiplier * dt;
+      if (pin.pos >= 1.0) { pin.pos = 1.0; pin.dir = -1; }
+      if (pin.pos <= 0.0) { pin.pos = 0.0; pin.dir = 1; }
+
+      state.speedKmh = Math.round(40 + pin.pos * 95);
+      const el = document.getElementById('pinPower');
+      if (el) el.style.left = `${pin.pos * 100}%`;
+
+      const badge = document.getElementById('badgePower');
+      if (badge) {
+        if (pin.pos >= 0.56 && pin.pos <= 0.82) {
+          badge.textContent = `${state.speedKmh} km/s (İDEAL FÜZE)`;
+        } else if (pin.pos >= 0.89) {
+          badge.textContent = `${state.speedKmh} km/s (KONTROLSÜZ)`;
+        } else {
+          badge.textContent = `${state.speedKmh} km/s (YAVAŞ)`;
+        }
       }
     }
+  }
 
-    // 6. Ters Köşe / Yanılma Şansı (Her zaman mevcuttur)
-    const blunderRoll = Math.random();
-    if (blunderRoll < 0.15) {
-      // Kaleci tamamen ters köşeye atlar!
-      saveProb = 0.05;
+  function handleTimingBarAction() {
+    if (state.currentState !== GAME_STATE.AIMING) return;
+    sfx.ensureRunning();
+
+    if (state.timingStage === TIMING_STAGE.HORIZONTAL) {
+      // 1. AŞAMAYI KİLİTLE
+      const pos = state.timingPins.horizontal.pos;
+      state.lockedValues.horizontal = pos;
+      const isGreen = (pos >= 0.08 && pos <= 0.28) || (pos >= 0.72 && pos <= 0.92);
+      state.lockedValues.isHorizGreen = isGreen;
+
+      const cardH = document.getElementById('cardHorizontal');
+      const cardV = document.getElementById('cardVertical');
+      const badgeH = document.getElementById('badgeHorizontal');
+      if (cardH) { cardH.classList.remove('active'); cardH.classList.add('locked'); }
+      if (cardV) { cardV.classList.remove('disabled'); cardV.classList.add('active'); }
+      if (badgeH) {
+        badgeH.textContent = isGreen ? '90 KÖŞE (YEŞİL) ✓' : (pos < 0.08 || pos > 0.92 ? 'AUT (KIRMIZI) ✕' : 'ORTA (SARI)');
+      }
+
+      document.getElementById('actionBtnStep').textContent = '2. AŞAMA';
+      document.getElementById('actionBtnTitle').textContent = 'DİKEY YÜKSEKLİĞİ KİLİTLE';
+
+      state.timingStage = TIMING_STAGE.VERTICAL;
+      sfx.playWhistle();
+    } else if (state.timingStage === TIMING_STAGE.VERTICAL) {
+      // 2. AŞAMAYI KİLİTLE
+      const pos = state.timingPins.vertical.pos;
+      state.lockedValues.vertical = pos;
+      const isGreen = (pos >= 0.10 && pos <= 0.35) || (pos >= 0.73 && pos <= 0.95);
+      state.lockedValues.isVertGreen = isGreen;
+
+      const cardV = document.getElementById('cardVertical');
+      const cardP = document.getElementById('cardPower');
+      const badgeV = document.getElementById('badgeVertical');
+      if (cardV) { cardV.classList.remove('active'); cardV.classList.add('locked'); }
+      if (cardP) { cardP.classList.remove('disabled'); cardP.classList.add('active'); }
+      if (badgeV) {
+        badgeV.textContent = isGreen ? '90 ÇATAL (YEŞİL) ✓' : (pos < 0.10 ? 'ÜSTTEN AUT ✕' : 'ORTA BOY (SARI)');
+      }
+
+      document.getElementById('actionBtnStep').textContent = '3. AŞAMA';
+      document.getElementById('actionBtnTitle').textContent = 'GÜCÜ KİLİTLE & VUR!';
+
+      state.timingStage = TIMING_STAGE.POWER;
+      sfx.playWhistle();
+    } else if (state.timingStage === TIMING_STAGE.POWER) {
+      // 3. AŞAMAYI KİLİTLE VE ŞUT ÇEK
+      const pos = state.timingPins.power.pos;
+      state.lockedValues.power = pos;
+      const isGreen = (pos >= 0.56 && pos <= 0.82);
+      state.lockedValues.isPowerGreen = isGreen;
+
+      // Kusursuz Vuruş Kontrolü (3 Bar da Yeşil mi?)
+      state.lockedValues.isTripleGreen = state.lockedValues.isHorizGreen && state.lockedValues.isVertGreen && isGreen;
+
+      const cardP = document.getElementById('cardPower');
+      const badgeP = document.getElementById('badgePower');
+      if (cardP) { cardP.classList.remove('active'); cardP.classList.add('locked'); }
+      if (badgeP) {
+        badgeP.textContent = `${state.speedKmh} km/s ${isGreen ? '(İDEAL FÜZE) ✓' : (pos >= 0.89 ? '(KONTROLSÜZ) ✕' : '(YAVAŞ)')}`;
+      }
+
+      const btn = document.getElementById('timingActionBtn');
+      if (btn) {
+        btn.disabled = true;
+        document.getElementById('actionBtnStep').textContent = 'VURULDU';
+        document.getElementById('actionBtnTitle').textContent = state.lockedValues.isTripleGreen ? '⚡ KUSURSUZ 90 ŞUTU!' : 'TOP UÇUŞTA...';
+      }
+
+      state.timingStage = TIMING_STAGE.LOCKED;
+      executeShot();
+    }
+  }
+
+  function resetTimingBars() {
+    state.timingStage = TIMING_STAGE.HORIZONTAL;
+    state.timingPins.horizontal.pos = 0.5;
+    state.timingPins.horizontal.dir = 1;
+    state.timingPins.vertical.pos = 0.5;
+    state.timingPins.vertical.dir = 1;
+    state.timingPins.power.pos = 0.1;
+    state.timingPins.power.dir = 1;
+    state.lockedValues.isHorizGreen = false;
+    state.lockedValues.isVertGreen = false;
+    state.lockedValues.isPowerGreen = false;
+    state.lockedValues.isTripleGreen = false;
+    state.isSweetSpotGoal = false;
+
+    const cardH = document.getElementById('cardHorizontal');
+    const cardV = document.getElementById('cardVertical');
+    const cardP = document.getElementById('cardPower');
+    if (cardH && cardV && cardP) {
+      cardH.className = 'timing-bar-card active';
+      cardV.className = 'timing-bar-card disabled';
+      cardP.className = 'timing-bar-card disabled';
+      document.getElementById('badgeHorizontal').textContent = 'SALINIYOR';
+      document.getElementById('badgeVertical').textContent = 'BEKLİYOR';
+      document.getElementById('badgePower').textContent = 'BEKLİYOR';
     }
 
-    // 7. KRİTİK KURAL: %90 HARD-CAP SINIRI
-    // Math.min(saveProb, 0.90) formülüyle kalecinin kurtarış şansı asla %90'ı geçemez!
-    saveProb = Math.max(0.05, Math.min(saveProb, 0.90));
-
-    console.log(`[AI GK] Mod: ${state.difficulty} | Hız: ${state.speedKmh} km/s | Hesaplanan Kurtarış: %${(saveProb * 100).toFixed(1)} (Hard-Cap %90 devrede)`);
-
-    // Zar atışı
-    const dice = Math.random();
-    const willSave = dice < saveProb;
-
-    return {
-      willSave: willSave,
-      saveProb: saveProb
-    };
+    const btn = document.getElementById('timingActionBtn');
+    if (btn) {
+      btn.disabled = false;
+      document.getElementById('actionBtnStep').textContent = '1. AŞAMA';
+      document.getElementById('actionBtnTitle').textContent = 'YATAY YÖNÜ KİLİTLE';
+    }
   }
 
   /* ==========================================================================
-     9. ŞUT İCRA MEKANİZMASI & FİZİK BAŞLATMA
+     9. ŞUT İCRA MEKANİZMASI & FİZİK MOTORU
      ========================================================================== */
   function executeShot() {
-    if (state.currentState !== GAME_STATE.AIMING) return;
-
     state.currentState = GAME_STATE.RUNUP;
     shooter.reset();
-    document.getElementById('shootBtn').disabled = true;
     document.getElementById('aimHintOverlay').classList.add('fade-out');
 
     sfx.playWhistle();
 
-    // 1. Sapma (Hata Payı) Hesabı: Hız arttıkça hata payı hafif artar
+    // 1. Sapma (Hata Payı) Hesabı
     const speedRatio = (state.speedKmh - 40) / 95;
-    const maxSpread = 0.03 + speedRatio * 0.08;
+    const maxSpread = 0.02 + speedRatio * 0.04;
     const errX = (Math.random() * 2 - 1) * maxSpread;
     const errY = (Math.random() * 2 - 1) * maxSpread;
 
@@ -1227,47 +1462,75 @@
     const side = actualTarget.x < -0.2 ? 'L' : (actualTarget.x > 0.2 ? 'R' : 'C');
     state.shotHistory.push(side);
 
-    // 2. Kaleci Yapay Zekası Kararı
-    const aiDecision = calculateGoalkeeperSave(actualTarget);
+    // 2. Kaleci İhtimal Haritasına Göre Atlayacağı Sektörü Seç
+    const chosenSector = pickGkSectorByProbability();
+    state.chosenGkSector = chosenSector.id;
+
+    // Oyuncunun şutunun hedef sektörü
+    const pCol = actualTarget.x < -0.33 ? 0 : (actualTarget.x > 0.33 ? 2 : 1);
+    const pRow = actualTarget.y >= 0.5 ? 0 : 1;
+    const playerSectorId = (pRow === 0 ? 'T' : 'B') + (pCol === 0 ? 'L' : (pCol === 2 ? 'R' : 'C'));
+
+    // Aut / Direk Kontrolü
+    const isOutOrPost = (Math.abs(actualTarget.x) > 1.05) || (actualTarget.y > 1.05) || (actualTarget.y < -0.05);
+
+    let willSave = false;
+    let isSweetSpotGoal = false;
+
+    if (!isOutOrPost) {
+      if (chosenSector.id === playerSectorId) {
+        // Kaleci oyuncunun vurduğu köşeye atladı!
+        if (state.lockedValues.isTripleGreen) {
+          // KRİTİK KUSURSUZ VURUŞ (SWEET SPOT) KURALI:
+          // 3 bar da yeşil merkezde durdurulduysa kaleci aynı köşeye atlasa bile GOL OLUR!
+          willSave = false;
+          isSweetSpotGoal = true;
+          console.log(`[SWEET SPOT GOL] 3 bar yeşil! Kaleci ${chosenSector.name} köşesine uçtu ama top çatala gitti!`);
+        } else {
+          // Normal vuruşta kaleci köşeyi bildi ve kurtardı (Maks kurtarış tavanı %90)
+          const dice = Math.random();
+          willSave = dice < 0.90; // Hard-cap %90
+          console.log(`[GK KURTARIŞ] Kaleci ${chosenSector.name} köşesini bildi! Kurtarış: ${willSave}`);
+        }
+      } else {
+        // Kaleci ters köşeye atladı -> Kesin GOL!
+        willSave = false;
+        console.log(`[TERS KÖŞE GOL] Kaleci ${chosenSector.name} tarafına atladı, top ${playerSectorId} köşesine gitti!`);
+      }
+    }
+
+    state.isSweetSpotGoal = isSweetSpotGoal;
 
     // Koşu süresinden sonra topa vurulur (0.45 sn)
     setTimeout(() => {
       state.currentState = GAME_STATE.FLIGHT;
       sfx.playKick();
 
-      // Topun uçuş parametreleri
       const screenTarget = getGoalScreenPos(actualTarget);
       const flightDuration = Math.max(0.42, 1.25 - (state.speedKmh / 135) * 0.75);
 
       ball.reset();
       ball.vz = 1.0 / flightDuration;
-
-      // Başlangıç hızları
       ball.vx = (screenTarget.x - PENALTY_SPOT.x) / flightDuration;
       ball.vy = (screenTarget.y - (PENALTY_SPOT.y - 12)) / flightDuration;
 
-      // Falso parametresi (Magnus etkisi)
-      // impact.x < 0 -> sola vurulur, top sağa kavis alır; impact.x > 0 -> sağa vurulur, sola kavis
+      // Falso
       ball.spinX = -state.impact.x;
       ball.spinY = state.impact.y;
 
-      // Kaleci atlayışını başlat
-      let gkTargetX = screenTarget.x;
-      let gkTargetY = screenTarget.y;
+      // Kaleci atlayış hedefi (Seçtiği sektörün merkezine uçar)
+      const colW = GOAL.width / 3;
+      const rowH = GOAL.height / 2;
+      let gkTargetX = GOAL.leftX + (chosenSector.col + 0.5) * colW;
+      let gkTargetY = GOAL.crossbarY + (chosenSector.row + 0.5) * rowH;
 
-      if (!aiDecision.willSave) {
-        // Kaleci yetişemez veya ters köşeye uçar
-        if (Math.random() < 0.3) {
-          // Ters köşe
-          gkTargetX = GOAL.leftX + GOAL.width - (screenTarget.x - GOAL.leftX);
-        } else {
-          // Kısa kalır (elinin ucuyla kaçırır)
-          gkTargetX = (goalkeeper.baseX + screenTarget.x) * 0.65;
-          gkTargetY = Math.max(GOAL.crossbarY + 30, screenTarget.y + 25);
-        }
+      if (isSweetSpotGoal) {
+        // Kusursuz vuruşta kaleci elinin ucuyla kaçırır (parmak ucundan fileye)
+        gkTargetX = (goalkeeper.baseX + screenTarget.x) * 0.72;
+        gkTargetY = Math.max(GOAL.crossbarY + 30, screenTarget.y + 25);
       }
 
-      goalkeeper.triggerDive(gkTargetX, gkTargetY, flightDuration * 0.95, aiDecision.willSave);
+      goalkeeper.triggerDive(gkTargetX, gkTargetY, flightDuration * 0.95, willSave);
     }, 450);
   }
 
@@ -1287,13 +1550,12 @@
     // Puanlama Kuralları
     if (result === SHOT_RESULT.GOAL) {
       state.userGoals++;
-      // Taban Puan: 100
       let base = 100;
 
       // Hız Bonusu (0 .. 50)
       const speedBonus = Math.round(((state.speedKmh - 40) / 95) * 50);
 
-      // 90'lar & Köşe Bonusu (0 .. 75)
+      // 90'lar & Köşe Bonusu
       const distFromCenter = Math.sqrt(Math.pow(state.target.x, 2) + Math.pow(state.target.y - 0.5, 2));
       let cornerBonus = 0;
       if (distFromCenter > 0.8) {
@@ -1303,7 +1565,10 @@
         cornerBonus = 35;
       }
 
-      let subTotal = base + speedBonus + cornerBonus;
+      // Kusursuz Vuruş (Sweet Spot) Ekstra Bonusu (+100 Puan)
+      let sweetSpotBonus = state.isSweetSpotGoal ? 100 : 0;
+
+      let subTotal = base + speedBonus + cornerBonus + sweetSpotBonus;
 
       // Zor Mod Çarpanı (1.5x)
       if (state.difficulty === 'HARD') {
@@ -1314,8 +1579,13 @@
 
       state.totalPoints += shotPoints;
 
-      announcementTitle = isCorner90 ? "90'A GÖÖÖL!" : "GÖÖÖL!";
-      announcementSub = `${TEAMS[state.team].shooter.name} fileleri havalandırdı!`;
+      if (state.isSweetSpotGoal) {
+        announcementTitle = "KUSURSUZ 90'A GÖÖÖL! 🎯";
+        announcementSub = '3 bar da yeşil! Kaleci köşeyi bildi ama uzanamadı!';
+      } else {
+        announcementTitle = isCorner90 ? "90'A GÖÖÖL!" : "GÖÖÖL!";
+        announcementSub = `${TEAMS[state.team].shooter.name} fileleri havalandırdı!`;
+      }
       cardClass = 'ann-goal';
     } else if (result === SHOT_RESULT.SAVED) {
       announcementTitle = 'MÜTHİŞ KURTARIŞ!';
@@ -1340,7 +1610,8 @@
       result: result,
       points: shotPoints,
       speed: state.speedKmh,
-      isCorner90: isCorner90
+      isCorner90: isCorner90,
+      isSweetSpot: state.isSweetSpotGoal
     });
 
     console.log(`[SHOT RESULT] Round ${state.currentRound + 1}: ${result} | Puan: +${shotPoints} | Toplam: ${state.totalPoints}`);
@@ -1357,10 +1628,8 @@
       state.currentRound++;
 
       if (state.currentRound < state.maxRounds) {
-        // Yeni atış hazırlığı
         prepareNextShot();
       } else {
-        // 5 Penaltılık Seri Tamamlandı
         endMatchSeries();
       }
     }, 1800);
@@ -1371,13 +1640,12 @@
     ball.reset();
     goalkeeper.reset();
     shooter.reset();
-    document.getElementById('shootBtn').disabled = false;
+    resetTimingBars();
     document.getElementById('aimHintOverlay').classList.remove('fade-out');
 
     // UI Güncelle
     document.getElementById('roundBadge').textContent = `Atış ${state.currentRound + 1} / ${state.maxRounds}`;
 
-    // Mevcut penaltı göstergesini aktifleştir
     const dots = document.querySelectorAll('.p-dot');
     dots.forEach((dot, idx) => {
       dot.classList.remove('current');
@@ -1387,7 +1655,8 @@
 
   function endMatchSeries() {
     state.currentState = GAME_STATE.SERIES_OVER;
-    document.getElementById('shootBtn').disabled = true;
+    const btn = document.getElementById('timingActionBtn');
+    if (btn) btn.disabled = true;
 
     // İstatistikleri hesapla
     const totalGoals = state.userGoals;
@@ -1403,6 +1672,7 @@
         const sb = Math.round(((r.speed - 40) / 95) * 50);
         totalSpeedBonus += sb;
         if (r.isCorner90) totalCornerBonus += 75;
+        if (r.isSweetSpot) totalCornerBonus += 100;
       }
     });
 
@@ -1420,6 +1690,11 @@
     document.getElementById('ptsSpeedBonus').textContent = `+${totalSpeedBonus}`;
     document.getElementById('ptsCornerBonus').textContent = `+${totalCornerBonus}`;
     document.getElementById('ptsMultiplier').textContent = state.difficulty === 'HARD' ? `+${totalMultiplier}` : '0 (Kolay Mod)';
+
+    // Kaydedilen oyuncu adını yazdır ve skoru otomatik kaydet
+    const savedNameEl = document.getElementById('savedPlayerNameDisplay');
+    if (savedNameEl) savedNameEl.textContent = state.username;
+    saveScore(state.username);
 
     // Başlık ve Kupa
     const titleEl = document.getElementById('gameOverTitle');
@@ -1484,92 +1759,6 @@
 
     const curTeam = TEAMS[teamId];
     document.getElementById('matchupBadge').textContent = `Şutör: ${curTeam.shooter.name} | Kaleci: ${curTeam.rivalGk.name}`;
-
-    // Target butonları aktif rengi tazele
-    syncTargetButtons();
-  }
-
-  function syncTargetButtons() {
-    document.querySelectorAll('.target-btn').forEach(btn => {
-      btn.classList.remove('active');
-    });
-
-    let preset = 'center';
-    if (state.target.x < -0.4 && state.target.y > 0.6) preset = 'top-left';
-    else if (Math.abs(state.target.x) <= 0.4 && state.target.y > 0.6) preset = 'top-center';
-    else if (state.target.x > 0.4 && state.target.y > 0.6) preset = 'top-right';
-    else if (state.target.x < -0.4 && state.target.y <= 0.4) preset = 'bottom-left';
-    else if (state.target.x > 0.4 && state.target.y <= 0.4) preset = 'bottom-right';
-
-    const matchBtn = document.querySelector(`.target-btn[data-target="${preset}"]`);
-    if (matchBtn) matchBtn.classList.add('active');
-
-    // Metin etiketi
-    const labels = {
-      'top-left': 'Sol Üst 90',
-      'top-center': 'Üst Orta',
-      'top-right': 'Sağ Üst 90',
-      'bottom-left': 'Sol Alt',
-      'center': 'Merkez',
-      'bottom-right': 'Sağ Alt'
-    };
-    document.getElementById('targetCoordLabel').textContent = labels[preset] || 'Özel Hedef';
-  }
-
-  function setTargetPreset(preset) {
-    switch (preset) {
-      case 'top-left': state.target = { x: -0.85, y: 0.90 }; break;
-      case 'top-center': state.target = { x: 0.0, y: 0.88 }; break;
-      case 'top-right': state.target = { x: 0.85, y: 0.90 }; break;
-      case 'bottom-left': state.target = { x: -0.85, y: 0.15 }; break;
-      case 'center': state.target = { x: 0.0, y: 0.50 }; break;
-      case 'bottom-right': state.target = { x: 0.85, y: 0.15 }; break;
-    }
-    syncTargetButtons();
-  }
-
-  function setImpact(ix, iy) {
-    // ix: -1 .. 1, iy: -1 .. 1
-    state.impact.x = Math.max(-1, Math.min(1, ix));
-    state.impact.y = Math.max(-1, Math.min(1, iy));
-
-    // Pointer pozisyonu (104x104 diyagram)
-    const pointer = document.getElementById('impactPointer');
-    const px = 52 + state.impact.x * 46;
-    const py = 52 + state.impact.y * 46;
-    pointer.style.left = `${px}px`;
-    pointer.style.top = `${py}px`;
-
-    // Etiketler
-    let spinText = 'Düz (0)';
-    if (state.impact.x < -0.3) spinText = `Sağ Falso (${Math.round(Math.abs(state.impact.x) * 100)})`;
-    else if (state.impact.x > 0.3) spinText = `Sol Falso (${Math.round(state.impact.x * 100)})`;
-
-    let heightText = 'Dengeli';
-    if (state.impact.y > 0.4) heightText = 'Havadan / Aşırtma ▲';
-    else if (state.impact.y < -0.4) heightText = 'Yerden / Sert ▼';
-
-    let descText = 'Füze (Knuckleball)';
-    if (Math.abs(state.impact.x) > 0.4) descText = 'Muz Falso (Magnus)';
-    else if (state.impact.y > 0.5) descText = 'Panenka / Aşırtma';
-
-    document.getElementById('spinValueText').textContent = spinText;
-    document.getElementById('heightValueText').textContent = heightText;
-    document.getElementById('impactDescLabel').textContent = descText;
-  }
-
-  function setPower(kmh) {
-    state.speedKmh = Math.max(40, Math.min(135, parseInt(kmh, 10)));
-    document.getElementById('powerRangeInput').value = state.speedKmh;
-    document.getElementById('powerSpeedKmh').textContent = `${state.speedKmh} km/s`;
-
-    const pct = ((state.speedKmh - 40) / 95) * 100;
-    document.getElementById('powerBarFill').style.width = `${pct}%`;
-    document.getElementById('powerIndicator').style.left = `${pct}%`;
-
-    // Sapma yüzdesi
-    const errPct = (3.0 + (pct / 100) * 4.5).toFixed(1);
-    document.getElementById('errorMarginBadge').innerHTML = `<span>🎯 İsabet Sapması: <strong>±${errPct}%</strong></span>`;
   }
 
   /* ==========================================================================
@@ -1583,7 +1772,6 @@
       if (raw) return JSON.parse(raw);
     } catch (e) { /* sessiz */ }
 
-    // Varsayılan nostaljik derbi rekorları
     return [
       { name: 'Alex10', team: 'FB', diff: 'ZOR', goals: '5/5', score: 920, date: '2026-10-12' },
       { name: 'Hagi10', team: 'GS', diff: 'ZOR', goals: '5/5', score: 905, date: '2026-10-15' },
@@ -1595,7 +1783,7 @@
   function saveScore(name) {
     const list = getLeaderboard();
     const entry = {
-      name: name || 'DerbiOyuncusu',
+      name: name || state.username || 'DerbiUstası',
       team: state.team,
       diff: state.difficulty === 'HARD' ? 'ZOR' : 'KOLAY',
       goals: `${state.userGoals}/${state.maxRounds}`,
@@ -1605,18 +1793,18 @@
 
     list.push(entry);
     list.sort((a, b) => b.score - a.score);
-    const topList = list.slice(0, 10); // İlk 10
+    const topList = list.slice(0, 10);
 
     try {
       localStorage.setItem(LEADERBOARD_KEY, JSON.stringify(topList));
     } catch (e) { /* sessiz */ }
 
-    showToast('Skorunuz Liderlik Tablosuna başarıyla kaydedildi! 🏆');
     renderLeaderboard();
   }
 
   function renderLeaderboard() {
     const tbody = document.getElementById('leaderboardTbody');
+    if (!tbody) return;
     const list = getLeaderboard();
     tbody.innerHTML = '';
 
@@ -1669,31 +1857,29 @@
         team: team || 'GS'
       };
 
-      // Banner'ı görünür kıl
       const banner = document.getElementById('challengeBanner');
       document.getElementById('challengeText').innerHTML =
         `<strong>${escapeHtml(rival)}</strong> sana meydan okudu! Hedef Skor: <strong>${state.challenge.targetScore}</strong> Puan. Geçebilir misin?`;
       banner.classList.remove('hidden');
 
-      // Rakip takımın karşısını varsayılan olarak seç
       if (team === 'FB') applyTeamTheme('GS');
       else if (team === 'GS') applyTeamTheme('FB');
     }
   }
 
   function copyChallengeLink() {
-    const nickname = document.getElementById('playerNicknameInput').value.trim() || 'DerbiUstası';
     const currentUrl = window.location.origin + window.location.pathname;
-    const challengeUrl = `${currentUrl}?rival=${encodeURIComponent(nickname)}&targetScore=${state.totalPoints}&team=${state.team}`;
+    const challengeUrl = `${currentUrl}?rival=${encodeURIComponent(state.username)}&targetScore=${state.totalPoints}&team=${state.team}`;
+    const inviteTemplate = `⚽ Derbi Penaltı'da ${state.username} olarak ${state.totalPoints} puan yaptım! Benden daha yüksek skor yapabilecek misin? 👉 ${challengeUrl}`;
 
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(challengeUrl).then(() => {
-        showToast('🔗 Meydan okuma linki kopyalandı! Arkadaşına gönder!');
+      navigator.clipboard.writeText(inviteTemplate).then(() => {
+        showToast('🔗 Meydan okuma mesajı ve linki kopyalandı! Arkadaşına gönder!');
       }).catch(() => {
-        fallbackCopy(challengeUrl);
+        fallbackCopy(inviteTemplate);
       });
     } else {
-      fallbackCopy(challengeUrl);
+      fallbackCopy(inviteTemplate);
     }
   }
 
@@ -1704,99 +1890,29 @@
     input.select();
     document.execCommand('copy');
     document.body.removeChild(input);
-    showToast('🔗 Meydan okuma linki kopyalandı! Arkadaşına gönder!');
+    showToast('🔗 Meydan okuma mesajı ve linki kopyalandı! Arkadaşına gönder!');
   }
 
   /* ==========================================================================
      14. OLAY DİNLEYİCİLERİ (EVENT LISTENERS)
      ========================================================================== */
   function setupEventListeners() {
-    // 1. Şut Butonu ve Space Tuşu
-    const shootBtn = document.getElementById('shootBtn');
-    shootBtn.addEventListener('click', () => {
-      executeShot();
-    });
+    // 1. Zamanlama Aksiyon Butonu ve Space Tuşu
+    const actionBtn = document.getElementById('timingActionBtn');
+    if (actionBtn) {
+      actionBtn.addEventListener('click', () => {
+        handleTimingBarAction();
+      });
+    }
 
     window.addEventListener('keydown', (e) => {
       if (e.code === 'Space' && e.target.tagName !== 'INPUT') {
         e.preventDefault();
-        executeShot();
+        handleTimingBarAction();
       }
     });
 
-    // 2. Kalede Tıklayarak Nişan Alma (Canvas Click)
-    canvas.addEventListener('click', (e) => {
-      if (state.currentState !== GAME_STATE.AIMING) return;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = WIDTH / rect.width;
-      const scaleY = HEIGHT / rect.height;
-      const clickX = (e.clientX - rect.left) * scaleX;
-      const clickY = (e.clientY - rect.top) * scaleY;
-
-      // Kale sınırları içindeyse hedefi ayarla
-      if (clickX >= GOAL.leftX - 40 && clickX <= GOAL.rightX + 40 &&
-          clickY >= GOAL.crossbarY - 30 && clickY <= GOAL.groundY + 20) {
-
-        const normX = (clickX - (GOAL.leftX + GOAL.width * 0.5)) / (GOAL.width * 0.45);
-        const normY = (GOAL.groundY - clickY) / (GOAL.height * 0.92);
-
-        state.target.x = Math.max(-1.1, Math.min(1.1, normX));
-        state.target.y = Math.max(-0.1, Math.min(1.1, normY));
-
-        syncTargetButtons();
-        sfx.ensureRunning();
-      }
-    });
-
-    // 3. Hedef Hızlı Seçim Butonları
-    document.querySelectorAll('.target-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        if (state.currentState !== GAME_STATE.AIMING) return;
-        const targetType = btn.getAttribute('data-target');
-        setTargetPreset(targetType);
-        sfx.ensureRunning();
-      });
-    });
-
-    // 4. İnteraktif Top Vuruş Noktası (Ball Diagram Click)
-    const ballDiag = document.getElementById('ballDiagram');
-    ballDiag.addEventListener('click', (e) => {
-      const rect = ballDiag.getBoundingClientRect();
-      const cx = rect.width / 2;
-      const cy = rect.height / 2;
-      const clickX = e.clientX - rect.left;
-      const clickY = e.clientY - rect.top;
-
-      const normX = (clickX - cx) / cx;
-      const normY = (clickY - cy) / cy;
-
-      setImpact(normX, normY);
-      sfx.ensureRunning();
-    });
-
-    // Mini Preset Butonları
-    document.querySelectorAll('.mini-preset-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.mini-preset-btn').forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        const p = btn.getAttribute('data-preset');
-        switch (p) {
-          case 'left-curl': setImpact(-0.65, 0.1); break;
-          case 'knuckle': setImpact(0, 0); break;
-          case 'right-curl': setImpact(0.65, 0.1); break;
-          case 'chip': setImpact(0, 0.7); break;
-        }
-        sfx.ensureRunning();
-      });
-    });
-
-    // 5. Şut Hızı Slider'ı
-    const powerInput = document.getElementById('powerRangeInput');
-    powerInput.addEventListener('input', (e) => {
-      setPower(e.target.value);
-    });
-
-    // 6. Takım Seçim Kartları
+    // 2. Takım Seçim Kartları
     document.querySelectorAll('.team-card').forEach(card => {
       card.addEventListener('click', () => {
         document.querySelectorAll('.team-card').forEach(c => c.classList.remove('active'));
@@ -1806,8 +1922,34 @@
       });
     });
 
-    // 7. Oyunu Başlat Butonu (Modal)
+    // 3. Başlangıç Kullanıcı Adı ve Oyunu Başlat Butonu
+    const initialNameInput = document.getElementById('initialUsernameInput');
+    if (initialNameInput) {
+      initialNameInput.value = state.username;
+      initialNameInput.addEventListener('input', () => {
+        const errorMsg = document.getElementById('usernameErrorMsg');
+        if (initialNameInput.value.trim() && errorMsg) {
+          errorMsg.classList.add('hidden');
+        }
+      });
+    }
+
     document.getElementById('startGameBtn').addEventListener('click', () => {
+      const nameInput = document.getElementById('initialUsernameInput');
+      const errorMsg = document.getElementById('usernameErrorMsg');
+      const val = nameInput ? nameInput.value.trim() : '';
+
+      // Kullanıcı adı boş bırakılamaz!
+      if (!val) {
+        if (errorMsg) errorMsg.classList.remove('hidden');
+        if (nameInput) nameInput.focus();
+        return;
+      }
+
+      if (errorMsg) errorMsg.classList.add('hidden');
+      state.username = val;
+      localStorage.setItem('derby_player_nickname', val);
+
       const diffRadio = document.querySelector('input[name="difficulty"]:checked');
       state.difficulty = diffRadio ? diffRadio.value : 'HARD';
 
@@ -1817,20 +1959,12 @@
       restartMatch();
     });
 
-    // 8. Skor Kaydet Butonu
-    document.getElementById('saveScoreBtn').addEventListener('click', () => {
-      const name = document.getElementById('playerNicknameInput').value.trim();
-      saveScore(name);
-      document.getElementById('saveScoreBtn').disabled = true;
-      document.getElementById('saveScoreBtn').textContent = 'KAYDEDİLDİ ✓';
-    });
-
-    // 9. Arkadaşa Meydan Oku Butonu
+    // 4. Arkadaşa Meydan Oku Butonu
     document.getElementById('copyChallengeLinkBtn').addEventListener('click', () => {
       copyChallengeLink();
     });
 
-    // 10. Yeniden Oyna Butonları
+    // 5. Yeniden Oyna Butonları
     document.getElementById('playAgainBtn').addEventListener('click', () => {
       document.getElementById('gameOverModal').classList.add('hidden');
       restartMatch();
@@ -1840,7 +1974,7 @@
       document.getElementById('teamSelectModal').classList.remove('hidden');
     });
 
-    // 11. Liderlik Tablosu Aç/Kapat
+    // 6. Liderlik Tablosu Aç/Kapat
     const openLeaderboard = () => {
       renderLeaderboard();
       document.getElementById('leaderboardModal').classList.remove('hidden');
@@ -1860,7 +1994,7 @@
       }
     });
 
-    // 12. Ses Aç/Kapat Butonu
+    // 7. Ses Aç/Kapat Butonu
     const soundBtn = document.getElementById('soundToggleBtn');
     soundBtn.addEventListener('click', () => {
       state.soundEnabled = !state.soundEnabled;
@@ -1868,7 +2002,7 @@
       showToast(state.soundEnabled ? 'Ses Açık' : 'Ses Kapatıldı');
     });
 
-    // 13. Banner Kapat Butonu
+    // 8. Banner Kapat Butonu
     document.getElementById('closeChallengeBtn').addEventListener('click', () => {
       document.getElementById('challengeBanner').classList.add('hidden');
     });
@@ -1895,9 +2029,6 @@
       if (idx === 0) dot.classList.add('current');
     });
 
-    document.getElementById('saveScoreBtn').disabled = false;
-    document.getElementById('saveScoreBtn').textContent = 'KAYDET';
-
     ball.reset();
     goalkeeper.reset();
     shooter.reset();
@@ -1922,6 +2053,7 @@
     shooter.update(dt);
     ball.update(dt);
     netGrid.update();
+    updateTimingBars(dt);
 
     // 2. Çizim
     ctx.clearRect(0, 0, WIDTH, HEIGHT);
@@ -1951,14 +2083,11 @@
      ========================================================================== */
   function init() {
     netGrid.init();
-    setImpact(0, 0);
-    setPower(95);
-    setTargetPreset('center');
+    resetTimingBars();
     setupEventListeners();
     parseUrlChallenge();
     applyTeamTheme(state.team);
 
-    // İlk animasyon döngüsünü başlat
     requestAnimationFrame(gameLoop);
   }
 

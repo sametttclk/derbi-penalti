@@ -89,116 +89,103 @@
         </div>
       </div>
 
-      <!-- Nişan Alma Yardımcısı ve Hızlı Hedef Grid İpuçları -->
+      <!-- Zamanlama Rehber İpucu -->
       <div class="aim-hint-overlay" id="aimHintOverlay">
-        <span>Kalede istediğin noktaya tıkla veya aşağıdaki kontrol panelinden ayarla</span>
+        <span>[SPACE] tuşuyla veya aşağıdaki butona basarak barları sırayla durdurun!</span>
       </div>
     </main>
 
-    <!-- İnteraktif Şut Kontrol Paneli -->
-    <footer class="control-hud">
-      <!-- 1. Hedef Yönü (Grid & Hızlı Seçim) -->
-      <div class="hud-panel hud-target">
-        <div class="panel-header">
-          <span class="panel-num">1</span>
-          <h3>HEDEF KÖŞE</h3>
-          <span class="target-coord" id="targetCoordLabel">Orta</span>
-        </div>
-        <div class="target-quick-grid">
-          <button class="target-btn" data-target="top-left" title="Sol Üst 90">Sol 90</button>
-          <button class="target-btn" data-target="top-center" title="Üst Orta">Üst</button>
-          <button class="target-btn" data-target="top-right" title="Sağ Üst 90">Sağ 90</button>
-          <button class="target-btn" data-target="bottom-left" title="Sol Alt Direk Dibi">Sol Alt</button>
-          <button class="target-btn active" data-target="center" title="Orta">Merkez</button>
-          <button class="target-btn" data-target="bottom-right" title="Sağ Alt Direk Dibi">Sağ Alt</button>
-        </div>
-        <div class="target-caption">Kalede hedefe tıklayarak milimetrik nişan alabilirsiniz.</div>
-      </div>
-
-      <!-- 2. Vuruş Noktası & Falso (Magnus Diyagramı) -->
-      <div class="hud-panel hud-impact">
-        <div class="panel-header">
-          <span class="panel-num">2</span>
-          <h3>VURUŞ NOKTASI & FALSO</h3>
-          <span class="impact-desc" id="impactDescLabel">Füze (Knuckleball)</span>
-        </div>
-        <div class="impact-diagram-wrapper">
-          <div class="ball-diagram" id="ballDiagram" title="Topa vurulacak noktaya tıklayın">
-            <!-- Vektörel Futbol Topu Çizimi -->
-            <svg class="ball-svg" viewBox="0 0 120 120">
-              <defs>
-                <radialGradient id="ballShade" cx="35%" cy="35%" r="65%">
-                  <stop offset="0%" stop-color="#ffffff"/>
-                  <stop offset="70%" stop-color="#d6dbe0"/>
-                  <stop offset="100%" stop-color="#8a95a5"/>
-                </radialGradient>
-              </defs>
-              <circle cx="60" cy="60" r="56" fill="url(#ballShade)" stroke="#222" stroke-width="3"/>
-              <!-- Pentagonlar ve dikişler -->
-              <polygon points="60,42 45,53 51,71 69,71 75,53" fill="#1e2229"/>
-              <polygon points="60,4 47,15 52,24 68,24 73,15" fill="#1e2229"/>
-              <polygon points="10,48 2,59 10,74 22,70 19,53" fill="#1e2229"/>
-              <polygon points="110,48 118,59 110,74 98,70 101,53" fill="#1e2229"/>
-              <polygon points="35,108 48,116 60,110 55,98 38,98" fill="#1e2229"/>
-              <polygon points="85,108 72,116 60,110 65,98 82,98" fill="#1e2229"/>
-              <!-- Dikiş çizgileri -->
-              <line x1="60" y1="42" x2="60" y2="24" stroke="#333" stroke-width="2"/>
-              <line x1="45" y1="53" x2="22" y2="53" stroke="#333" stroke-width="2"/>
-              <line x1="75" y1="53" x2="98" y2="53" stroke="#333" stroke-width="2"/>
-              <line x1="51" y1="71" x2="38" y2="98" stroke="#333" stroke-width="2"/>
-              <line x1="69" y1="71" x2="82" y2="98" stroke="#333" stroke-width="2"/>
-            </svg>
-            <!-- Tıklanan vuruş noktası imleci -->
-            <div class="impact-pointer" id="impactPointer" style="left: 60px; top: 60px;"></div>
+    <!-- 3 AŞAMALI ZAMANLAMA BARI (TIMING BAR) ŞUT KONTROL PANELİ -->
+    <footer class="control-hud timing-hud">
+      <!-- 1. Aşama: Yatay Yön Barı -->
+      <div class="timing-bar-card active" id="cardHorizontal">
+        <div class="bar-header">
+          <div class="bar-step-tag">
+            <span class="step-num">1</span> AŞAMA: YATAY YÖN
           </div>
-          <div class="impact-readout">
-            <div class="readout-item">
-              <span class="ro-label">Falso (Magnus):</span>
-              <span class="ro-val" id="spinValueText">Düz (0)</span>
-            </div>
-            <div class="readout-item">
-              <span class="ro-label">Yükseklik / Aşırtma:</span>
-              <span class="ro-val" id="heightValueText">Dengeli</span>
-            </div>
-            <div class="impact-presets">
-              <button class="mini-preset-btn" data-preset="left-curl" title="Sol Falso">↶ Sol</button>
-              <button class="mini-preset-btn active" data-preset="knuckle" title="Düz / Sert">⚡ Füze</button>
-              <button class="mini-preset-btn" data-preset="right-curl" title="Sağ Falso">↷ Sağ</button>
-              <button class="mini-preset-btn" data-preset="chip" title="Aşırtma">▲ Havadan</button>
-            </div>
+          <span class="bar-status-badge" id="badgeHorizontal">SALINIYOR</span>
+        </div>
+        <div class="timing-track-outer">
+          <div class="timing-track" id="trackHorizontal">
+            <div class="zone-segment zone-red" style="width: 8%;" title="Sol Aut / Direk"></div>
+            <div class="zone-segment zone-green" style="width: 20%;" title="Sol 90 / Köşe"></div>
+            <div class="zone-segment zone-yellow" style="width: 44%;" title="Orta (Kaleciye Yakın)"></div>
+            <div class="zone-segment zone-green" style="width: 20%;" title="Sağ 90 / Köşe"></div>
+            <div class="zone-segment zone-red" style="width: 8%;" title="Sağ Aut / Direk"></div>
+            <!-- Hareketli İbre -->
+            <div class="timing-pin" id="pinHorizontal" style="left: 50%;"></div>
           </div>
+        </div>
+        <div class="track-legend">
+          <span class="leg-item leg-red">Aut</span>
+          <span class="leg-item leg-green">Sol 90</span>
+          <span class="leg-item leg-yellow">Orta</span>
+          <span class="leg-item leg-green">Sağ 90</span>
+          <span class="leg-item leg-red">Aut</span>
         </div>
       </div>
 
-      <!-- 3. Şut Hızı (Power Bar) & Ateşleme Butonu -->
-      <div class="hud-panel hud-power">
-        <div class="panel-header">
-          <span class="panel-num">3</span>
-          <h3>ŞUT HIZI & GÜÇ</h3>
-          <span class="power-kmh" id="powerSpeedKmh">95 km/s</span>
-        </div>
-        
-        <div class="power-slider-container">
-          <div class="power-bar-track">
-            <div class="power-bar-fill" id="powerBarFill" style="width: 58%;"></div>
-            <div class="power-indicator" id="powerIndicator" style="left: 58%;"></div>
+      <!-- 2. Aşama: Dikey Yükseklik Barı -->
+      <div class="timing-bar-card disabled" id="cardVertical">
+        <div class="bar-header">
+          <div class="bar-step-tag">
+            <span class="step-num">2</span> AŞAMA: DİKEY YÜKSEKLİK
           </div>
-          <input type="range" id="powerRangeInput" min="40" max="135" value="95" step="1" aria-label="Şut Hızı (km/s)">
-          <div class="power-scale-labels">
-            <span>40 km/s (Hassas)</span>
-            <span>90 km/s (İdeal)</span>
-            <span>135 km/s (Füze / Riskli)</span>
+          <span class="bar-status-badge" id="badgeVertical">BEKLİYOR</span>
+        </div>
+        <div class="timing-track-outer">
+          <div class="timing-track" id="trackVertical">
+            <div class="zone-segment zone-red" style="width: 10%;" title="Üstten Aut"></div>
+            <div class="zone-segment zone-green" style="width: 25%;" title="Üst 90 Çatal"></div>
+            <div class="zone-segment zone-yellow" style="width: 38%;" title="Orta Yükseklik"></div>
+            <div class="zone-segment zone-green" style="width: 22%;" title="Yerden Sert Köşe"></div>
+            <div class="zone-segment zone-red" style="width: 5%;" title="Zayıf Yerden"></div>
+            <!-- Hareketli İbre -->
+            <div class="timing-pin" id="pinVertical" style="left: 50%;"></div>
           </div>
         </div>
-
-        <div class="error-margin-badge" id="errorMarginBadge">
-          <span>🎯 İsabet Sapması: <strong>±3.5%</strong></span>
+        <div class="track-legend">
+          <span class="leg-item leg-red">Üst Aut</span>
+          <span class="leg-item leg-green">Üst 90</span>
+          <span class="leg-item leg-yellow">Orta</span>
+          <span class="leg-item leg-green">Yerden</span>
+          <span class="leg-item leg-red">Yere Çarpma</span>
         </div>
+      </div>
 
-        <button id="shootBtn" class="shoot-action-btn">
-          <span class="shoot-icon">⚡</span>
-          <span class="shoot-text">ŞUT ÇEK</span>
-          <span class="shoot-hotkey">[SPACE]</span>
+      <!-- 3. Aşama: Şut Hızı / Güç Barı -->
+      <div class="timing-bar-card disabled" id="cardPower">
+        <div class="bar-header">
+          <div class="bar-step-tag">
+            <span class="step-num">3</span> AŞAMA: ŞUT GÜCÜ
+          </div>
+          <span class="bar-status-badge" id="badgePower">BEKLİYOR</span>
+        </div>
+        <div class="timing-track-outer">
+          <div class="timing-track" id="trackPower">
+            <div class="zone-segment zone-yellow" style="width: 56%;" title="Yavaş Şut (40-94 km/s)"></div>
+            <div class="zone-segment zone-green" style="width: 26%;" title="İdeal Füze (95-118 km/s)"></div>
+            <div class="zone-segment zone-yellow" style="width: 7%;" title="Sert (119-124 km/s)"></div>
+            <div class="zone-segment zone-red" style="width: 11%;" title="Kontrolsüz / Direk Riski (125-135 km/s)"></div>
+            <!-- Hareketli İbre -->
+            <div class="timing-pin" id="pinPower" style="left: 0%;"></div>
+          </div>
+        </div>
+        <div class="track-legend">
+          <span class="leg-item leg-yellow">40 km/s (Yavaş)</span>
+          <span class="leg-item leg-green">95-118 km/s (İdeal Füze)</span>
+          <span class="leg-item leg-red">125+ (Riskli)</span>
+        </div>
+      </div>
+
+      <!-- Tek Büyük Aksiyon Butonu (Durdur / Kilitle / Vur) -->
+      <div class="timing-action-panel">
+        <button id="timingActionBtn" class="timing-main-btn">
+          <div class="action-btn-content">
+            <span class="action-btn-step" id="actionBtnStep">1. AŞAMA</span>
+            <span class="action-btn-title" id="actionBtnTitle">YATAY YÖNÜ KİLİTLE</span>
+          </div>
+          <span class="action-btn-hotkey">[SPACE]</span>
         </button>
       </div>
     </footer>
@@ -210,6 +197,18 @@
       <div class="modal-header">
         <h2>DERBİ PENALTI SİMÜLASYONU</h2>
         <p>Takımını ve zorluk seviyeni belirle, efsanevi derbide kupayı kaldır!</p>
+      </div>
+
+      <!-- Kullanıcı Adı Girişi (Zorunlu) -->
+      <div class="username-input-card">
+        <label for="initialUsernameInput" class="username-label">
+          <span>⚽ OYUNCU ADI / RUMUZ</span>
+          <span class="required-star">*</span>
+        </label>
+        <div class="username-field-wrap">
+          <input type="text" id="initialUsernameInput" maxlength="15" placeholder="Adını veya Rumuzunu Gir" autocomplete="off" required>
+        </div>
+        <div id="usernameErrorMsg" class="username-error-msg hidden">⚠️ Lütfen başlamadan önce bir oyuncu adı giriniz!</div>
       </div>
 
       <div class="team-cards-grid">
@@ -297,12 +296,11 @@
         <div class="breakdown-row"><span>Zor Mod Çarpanı (1.5x):</span> <span id="ptsMultiplier">+170</span></div>
       </div>
 
-      <!-- Skor Kayıt Formu -->
+      <!-- Otomatik Skor Kayıt Bildirimi -->
       <div class="save-score-section">
-        <label for="playerNicknameInput">Liderlik Tablosuna Adını Yazdır:</label>
-        <div class="save-input-group">
-          <input type="text" id="playerNicknameInput" maxlength="15" placeholder="Adın veya Rumuzun" value="DerbiKralı">
-          <button id="saveScoreBtn" class="btn-save-score">KAYDET</button>
+        <div class="saved-player-badge">
+          <span>Oyuncu: <strong id="savedPlayerNameDisplay">DerbiUstası</strong></span>
+          <span class="saved-auto-tag">✓ Liderlik Tablosuna Kaydedildi</span>
         </div>
       </div>
 
@@ -310,10 +308,10 @@
       <div class="challenge-friend-card">
         <div class="challenge-info">
           <strong>Arkadaşına Meydan Oku!</strong>
-          <span>Özel skor linkini kopyala, arkadaşına gönder ve senin skorunu geçmesini bekle!</span>
+          <span>Skor linkini ve davet mesajını tek tıkla kopyala, arkadaşına gönder!</span>
         </div>
         <button id="copyChallengeLinkBtn" class="btn-challenge-copy">
-          🔗 LİNKİ KOPYALA
+          🔗 DAVETİ & LİNKİ KOPYALA
         </button>
       </div>
 
